@@ -1,0 +1,107 @@
+version: '3.6'
+
+services:
+  qbittorrent:
+    image: linuxserver/qbittorrent:latest
+    restart: always
+    environment:
+      - PUID=82
+      - PGID=82
+      - PORT=8080
+      - TZ=Europe/London
+      - UMASK=000
+      - WEBUI_PORT=8080
+    volumes:
+      - /home/aidan/qbittorrent/config:/config/
+      - /home/aidan/torrents:/downloads/
+    network_mode: 'service:gluetun'
+    labels:
+      - autoheal=true
+      - com.centurylinklabs.watchtower.enable="true"
+    healthcheck:
+      # Check if the network connection is down and restart with autoheal
+      test: ['CMD', 'curl', '-f', 'https://google.com/']
+      timeout: 5s
+      retries: 2
+      start_period: 5s
+    depends_on:
+      - gluetun
+  wireguard:
+    image: ghcr.io/linuxserver/wireguard
+    container_name: wireguard
+    depends_on:
+      - gluetun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+      - SERVERURL=wg.aidan.wtf #optional
+      - SERVERPORT=51821 #optional
+      - PEERS=20 #optional
+      - PEERDNS=1.1.1.1 #optional
+      - INTERNAL_SUBNET=10.0.69.0 #optional
+    volumes:
+      - /home/aidan/wireguard:/config
+      - /lib/modules:/lib/modules
+    network_mode: 'service:gluetun'
+    labels:
+      - autoheal=true
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: always
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'https://google.com/']
+      timeout: 5s
+      retries: 2
+      start_period: 5s
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    container_name: gluetun
+    ports:
+      - 51821:51821/udp
+    networks:
+      - proxy
+    volumes:
+      - /home/aidan/gluton:/gluetun/
+      - /home/aidan/gluton/forward-port:/tmp/gluetun/forwarded_port
+      - /home/aidan/gluton/ip:/tmp/gluetun/ip
+    environment:
+      # More variables are available, see the readme table
+      #- OPENVPN_CUSTOM_CONFIG=/gluetun/proton.conf
+      - OPENVPN_USER=
+      - OPENVPN_PASSWORD=
+      - VPNSP=pia
+      - PORT_FORWARDING=on
+      - PIA_ENCRYPTION=strong
+      - REGION=DE Frankfurt
+      - PORT_FORWARDING_STATUS_FILE=/tmp/gluetun/forwarded_port
+      - PUBLICIP_FILE=/tmp/gluetun/ip
+      # Timezone for accurate logs times
+      - TZ=Europe/London
+    labels:
+      - autoheal=true
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      # HTTPS
+      - traefik.http.routers.qbittorrent.rule=Host(`qb.aidan.wtf`)
+      - traefik.http.routers.qbittorrent.entrypoints=https
+      - traefik.http.routers.qbittorrent.tls.certresolver=le
+      - traefik.http.routers.qbittorrent.service=qbittorrent@docker
+      - traefik.http.services.qbittorrent.loadbalancer.server.port=8080
+      # HTTPS Redirect
+      - traefik.http.routers.qbittorrentr.rule=Host(`qb.aidan.wtf`)
+      # Makes web entery work
+      - traefik.http.routers.qbittorrentr.entrypoints=websecure
+      # Learn asp
+      # - traefik.http.routers.qbittorrentr.middlewares=qbittorrent
+      # Protect the service with google auth
+      #- traefik.http.routers.qbittorrent.middlewares=google-auth
+networks:
+  proxy:
+    external: true
